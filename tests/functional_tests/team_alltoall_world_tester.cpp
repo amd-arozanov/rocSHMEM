@@ -22,8 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "team_alltoall_world_tester.hpp"
-
+// This file is included by team_alltoall_world_tester.hpp
 // The kernel TeamAlltoallWorldTest is defined in team_alltoall_tester.cpp
 // and will be available through linking
 

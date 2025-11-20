@@ -56,7 +56,6 @@ target_sources(
     default_ctx_primitive_tester.cpp
     team_ctx_primitive_tester.cpp
     team_ctx_infra_tester.cpp
-    team_alltoall_world_tester.cpp
     amo_bitwise_tester.cpp
     amo_extended_tester.cpp
     amo_standard_tester.cpp
