@@ -22,53 +22,35 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef _TEAM_ALLTOALL_TESTER_HPP_
-#define _TEAM_ALLTOALL_TESTER_HPP_
+#ifndef _TEAM_ALLTOALL_WORLD_TESTER_HPP_
+#define _TEAM_ALLTOALL_WORLD_TESTER_HPP_
 
-#include <functional>
-#include <utility>
-
-#include "tester.hpp"
+#include "team_alltoall_tester.hpp"
 
 using namespace rocshmem;
 
-/************* *****************************************************************
- * HOST TESTER CLASS
+/******************************************************************************
+ * HOST TESTER CLASS - Uses ROCSHMEM_TEAM_WORLD directly
+ * This tester reuses most of the code from TeamAlltoallTester but
+ * always uses ROCSHMEM_TEAM_WORLD directly instead of creating split teams.
  *****************************************************************************/
 template <typename T1>
-class TeamAlltoallTester : public Tester {
+class TeamAlltoallWorldTester : public TeamAlltoallTester<T1> {
  public:
-  explicit TeamAlltoallTester(TesterArguments args);
-  virtual ~TeamAlltoallTester();
+  explicit TeamAlltoallWorldTester(TesterArguments args);
+  virtual ~TeamAlltoallWorldTester();
 
  protected:
-  virtual void resetBuffers(size_t size) override;
-
   virtual void preLaunchKernel() override;
-
   virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                             size_t size) override;
-
   virtual void postLaunchKernel() override;
 
-  virtual void verifyResults(size_t size) override;
-
-  T1 *source_buf = nullptr;
-  T1 *dest_buf = nullptr;
-
-protected:
-  int my_pe = 0;
-  int n_pes = 0;
-
-private:
-  /**
-   * This constant should equal ROCSHMEM_MAX_NUM_TEAMS - 1.
-   * The default value for the maximum number of teams is 40.
-   */
-  int num_teams = 39;
-  rocshmem_team_t *team_alltoall_world_dup;
+ private:
+  rocshmem_team_t *team_world_device;
 };
 
-#include "team_alltoall_tester.cpp"
+#include "team_alltoall_world_tester.cpp"
 
 #endif
+

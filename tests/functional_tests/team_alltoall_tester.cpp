@@ -175,30 +175,8 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
     num_teams = atoi(value);
   }
 
-  // Check if we should use ROCSHMEM_TEAM_WORLD directly to test the bug
-  // Set ROCSHMEM_TEST_USE_TEAM_WORLD=1 to enable this test mode
-  use_team_world_directly = false;
-  if ((value = getenv("ROCSHMEM_TEST_USE_TEAM_WORLD"))) {
-    use_team_world_directly = (atoi(value) != 0);
-  }
-
-  if (use_team_world_directly) {
-    // Allocate device memory for ROCSHMEM_TEAM_WORLD
-    // We need to copy it to device memory since it's a host variable
-    CHECK_HIP(hipMalloc(&team_alltoall_world_dup,
-                        sizeof(rocshmem_team_t)));
-    CHECK_HIP(hipMemcpy(team_alltoall_world_dup, &ROCSHMEM_TEAM_WORLD,
-                        sizeof(rocshmem_team_t), hipMemcpyHostToDevice));
-    // Warn if n_pes is less than 256, as the bug may not manifest
-    if (n_pes < 256) {
-      std::cerr << "Warning: Testing with ROCSHMEM_TEAM_WORLD directly. "
-                << "This test is designed to catch a bug that manifests "
-                << "when n_pes >= 256. Current n_pes = " << n_pes << std::endl;
-    }
-  } else {
-    CHECK_HIP(hipMalloc(&team_alltoall_world_dup,
-                        sizeof(rocshmem_team_t) * num_teams));
-  }
+  CHECK_HIP(
+      hipMalloc(&team_alltoall_world_dup, sizeof(rocshmem_team_t) * num_teams));
 }
 
 template <typename T1>
@@ -214,16 +192,13 @@ template <typename T1>
 void TeamAlltoallTester<T1>::preLaunchKernel() {
   bw_factor = n_pes;
 
-  // Only create split teams if not using TEAM_WORLD directly
-  if (!use_team_world_directly) {
-    for (int team_i = 0; team_i < num_teams; team_i++) {
-      team_alltoall_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
-      rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                  &team_alltoall_world_dup[team_i]);
-      if (team_alltoall_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
-        std::cout << "Team " << team_i << " is invalid!" << std::endl;
-        abort();
-      }
+  for (int team_i = 0; team_i < num_teams; team_i++) {
+    team_alltoall_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
+    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
+                                &team_alltoall_world_dup[team_i]);
+    if (team_alltoall_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
+      std::cout << "Team " << team_i << " is invalid!" << std::endl;
+      abort();
     }
   }
 }
@@ -235,21 +210,11 @@ void TeamAlltoallTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
 
   int num_elems = size / sizeof(T1);
 
-  if (use_team_world_directly) {
-    // Use ROCSHMEM_TEAM_WORLD directly - this tests the bug where
-    // alltoall_pSync_pool is allocated with wrong size
-    // team_alltoall_world_dup contains a copy of ROCSHMEM_TEAM_WORLD in device memory
-    hipLaunchKernelGGL(TeamAlltoallWorldTest<T1>, gridSize, blockSize,
-                       shared_bytes, stream, loop, args.skip, start_time,
-                       end_time, source_buf, dest_buf, num_elems,
-                       _shmem_context, *team_alltoall_world_dup);
-  } else {
-    // Use split teams (original behavior)
-    hipLaunchKernelGGL(TeamAlltoallTest<T1>, gridSize, blockSize, shared_bytes,
-                       stream, loop, args.skip, start_time, end_time,
-                       source_buf, dest_buf, num_elems, _shmem_context,
-                       team_alltoall_world_dup);
-  }
+  // Use split teams (original behavior)
+  hipLaunchKernelGGL(TeamAlltoallTest<T1>, gridSize, blockSize, shared_bytes,
+                     stream, loop, args.skip, start_time, end_time, source_buf,
+                     dest_buf, num_elems, _shmem_context,
+                     team_alltoall_world_dup);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
@@ -257,11 +222,8 @@ void TeamAlltoallTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
 
 template <typename T1>
 void TeamAlltoallTester<T1>::postLaunchKernel() {
-  // Only destroy teams if we created them
-  if (!use_team_world_directly && team_alltoall_world_dup != nullptr) {
-    for (int team_i = 0; team_i < num_teams; team_i++) {
-      rocshmem_team_destroy(team_alltoall_world_dup[team_i]);
-    }
+  for (int team_i = 0; team_i < num_teams; team_i++) {
+    rocshmem_team_destroy(team_alltoall_world_dup[team_i]);
   }
 }
 

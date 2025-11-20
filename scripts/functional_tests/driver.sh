@@ -53,6 +53,7 @@ declare -A TEST_NUMBERS=(
   ["collect"]="17"
   ["fcollect"]="18"
   ["alltoall"]="19"
+  ["alltoallworld"]="77"
   ["alltoalls"]="20"
   ["shmemptr"]="21"
   ["p"]="22"
@@ -439,7 +440,7 @@ TestColl() {
 
   ExecTest  "alltoall"         2       1            1         512
   # Test alltoall with ROCSHMEM_TEAM_WORLD directly to catch sync size bug
-  ExecTest  "alltoall"         2       1            1         512 "ROCSHMEM_TEST_USE_TEAM_WORLD=1"
+  ExecTest  "alltoallworld"    2       1            1         512
 
   ExecTest  "teambroadcast"    2       1            1         32768
 
@@ -626,7 +627,7 @@ TestGDA() {
 
   ExecTest  "alltoall"         2       1            1         512
   # Test alltoall with ROCSHMEM_TEAM_WORLD directly to catch sync size bug
-  ExecTest  "alltoall"         2       1            1         512 "ROCSHMEM_TEST_USE_TEAM_WORLD=1"
+  ExecTest  "alltoallworld"    2       1            1         512
 
   ExecTest  "teambroadcast"    2       1            1         32768
 

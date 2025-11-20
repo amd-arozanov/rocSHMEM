@@ -47,6 +47,7 @@
 #include "sync_all_tester.hpp"
 #include "team_sync_tester.hpp"
 #include "team_alltoall_tester.hpp"
+#include "team_alltoall_world_tester.hpp"
 #include "team_barrier_tester.hpp"
 #include "team_broadcast_tester.hpp"
 #include "team_ctx_infra_tester.hpp"
@@ -232,6 +233,16 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamAlltoallTester<double>(args));
       testers.push_back(new TeamAlltoallTester<char>(args));
       testers.push_back(new TeamAlltoallTester<unsigned char>(args));
+      return testers;
+    case TeamAllToAllWorldTestType:
+      if (rank == 0) {
+        std::cout
+            << "Alltoall World Test (uses ROCSHMEM_TEAM_WORLD directly) ###"
+            << std::endl;
+      }
+      testers.push_back(new TeamAlltoallWorldTester<int64_t>(args));
+      testers.push_back(new TeamAlltoallWorldTester<int>(args));
+      testers.push_back(new TeamAlltoallWorldTester<long long>(args));
       return testers;
     case TeamFCollectTestType:
       if (rank == 0) {

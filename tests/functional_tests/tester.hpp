@@ -57,6 +57,7 @@ enum TestType {
   CollectTestType = 17,
   TeamFCollectTestType = 18,
   TeamAllToAllTestType = 19,
+  TeamAllToAllWorldTestType = 77,
   AllToAllsTestType = 20,
   ShmemPtrTestType = 21,
   PTestType = 22,
