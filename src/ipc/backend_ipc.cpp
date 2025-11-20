@@ -108,8 +108,6 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
 void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
-  setup_team_world();
-
   setup_wrk_sync_buffers();
 
   rocshmem_collective_init();
@@ -117,6 +115,8 @@ void IPCBackend::init() {
   setup_fence_buffer();
 
   teams_init();
+
+  setup_team_world();
 
   TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
@@ -482,7 +482,7 @@ void IPCBackend::teams_init() {
                             * max_num_teams;
 
   alltoall_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
-  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BCAST_SYNC_SIZE
+  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_ALLTOALL_SYNC_SIZE
                             * max_num_teams;
 
   /* Accommodating for largest possible data type for pWrk */

@@ -107,13 +107,14 @@ __global__ void TeamAlltoallWorldTest(int loop,
                                       T1 *dest_buf,
                                       int num_elems,
                                       ShmemContextType ctx_type,
-                                      rocshmem_team_t team_world) {
+                                      rocshmem_team_t *team_world_device) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
   // Use ROCSHMEM_TEAM_WORLD directly with default context
   // This tests the bug where alltoall_pSync_pool is allocated with
   // ROCSHMEM_BCAST_SYNC_SIZE (256) instead of ROCSHMEM_ALLTOALL_SYNC_SIZE (257)
+  rocshmem_team_t team_world = *team_world_device;
   rocshmem_wg_team_create_ctx(team_world, ctx_type, &ctx);
 
   int n_pes = rocshmem_ctx_n_pes(ctx);

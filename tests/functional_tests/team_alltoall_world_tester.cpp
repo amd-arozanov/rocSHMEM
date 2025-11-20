@@ -35,6 +35,10 @@ TeamAlltoallWorldTester<T1>::TeamAlltoallWorldTester(TesterArguments args)
   // Allocate device memory for ROCSHMEM_TEAM_WORLD
   // We need to copy it to device memory since it's a host variable
   CHECK_HIP(hipMalloc(&team_world_device, sizeof(rocshmem_team_t)));
+
+  // ROCSHMEM_TEAM_WORLD contains a device pointer, so we copy the pointer value
+  // to device memory so kernel can access it
+  // hipMemcpy with hipMemcpyHostToDevice is synchronous, so no need for sync
   CHECK_HIP(hipMemcpy(team_world_device, &ROCSHMEM_TEAM_WORLD,
                       sizeof(rocshmem_team_t), hipMemcpyHostToDevice));
   
@@ -57,6 +61,9 @@ template <typename T1>
 void TeamAlltoallWorldTester<T1>::preLaunchKernel() {
   // No need to create split teams - we use ROCSHMEM_TEAM_WORLD directly
   this->bw_factor = this->n_pes;
+
+  // ROCSHMEM_TEAM_WORLD was copied in constructor, no need to copy again
+  // The value in device memory should remain valid
 }
 
 template <typename T1>
@@ -67,11 +74,13 @@ void TeamAlltoallWorldTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
 
   // Use ROCSHMEM_TEAM_WORLD directly - this tests the bug where
   // alltoall_pSync_pool is allocated with wrong size
+  // Pass team_world_device pointer - kernel will dereference it to get team
+  // value
   hipLaunchKernelGGL(TeamAlltoallWorldTest<T1>, gridSize, blockSize,
                      shared_bytes, this->stream, loop, this->args.skip,
                      this->start_time, this->end_time, this->source_buf,
                      this->dest_buf, num_elems, this->_shmem_context,
-                     *team_world_device);
+                     team_world_device);
 
   this->num_msgs = (loop + this->args.skip) * gridSize.x;
   this->num_timed_msgs = loop * gridSize.x;
