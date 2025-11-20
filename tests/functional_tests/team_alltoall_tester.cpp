@@ -106,14 +106,15 @@ __global__ void TeamAlltoallWorldTest(int loop,
                                       T1 *source_buf,
                                       T1 *dest_buf,
                                       int num_elems,
-                                      ShmemContextType ctx_type) {
+                                      ShmemContextType ctx_type,
+                                      rocshmem_team_t team_world) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
   // Use ROCSHMEM_TEAM_WORLD directly with default context
   // This tests the bug where alltoall_pSync_pool is allocated with
   // ROCSHMEM_BCAST_SYNC_SIZE (256) instead of ROCSHMEM_ALLTOALL_SYNC_SIZE (257)
-  rocshmem_wg_team_create_ctx(ROCSHMEM_TEAM_WORLD, ctx_type, &ctx);
+  rocshmem_wg_team_create_ctx(team_world, ctx_type, &ctx);
 
   int n_pes = rocshmem_ctx_n_pes(ctx);
 
@@ -128,7 +129,7 @@ __global__ void TeamAlltoallWorldTest(int loop,
     }
     // Use ROCSHMEM_TEAM_WORLD directly - this will catch the bug
     // when alltoall_pSync points to incorrectly sized memory
-    wg_team_alltoall<T1>(ctx, ROCSHMEM_TEAM_WORLD,
+    wg_team_alltoall<T1>(ctx, team_world,
                          dest_buf,   // T* dest
                          source_buf, // const T* source
                          num_elems); // int nelement
@@ -182,8 +183,12 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
   }
 
   if (use_team_world_directly) {
-    // When using TEAM_WORLD directly, we don't need to allocate teams array
-    team_alltoall_world_dup = nullptr;
+    // Allocate device memory for ROCSHMEM_TEAM_WORLD
+    // We need to copy it to device memory since it's a host variable
+    CHECK_HIP(hipMalloc(&team_alltoall_world_dup,
+                        sizeof(rocshmem_team_t)));
+    CHECK_HIP(hipMemcpy(team_alltoall_world_dup, &ROCSHMEM_TEAM_WORLD,
+                        sizeof(rocshmem_team_t), hipMemcpyHostToDevice));
     // Warn if n_pes is less than 256, as the bug may not manifest
     if (n_pes < 256) {
       std::cerr << "Warning: Testing with ROCSHMEM_TEAM_WORLD directly. "
@@ -233,10 +238,11 @@ void TeamAlltoallTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
   if (use_team_world_directly) {
     // Use ROCSHMEM_TEAM_WORLD directly - this tests the bug where
     // alltoall_pSync_pool is allocated with wrong size
+    // team_alltoall_world_dup contains a copy of ROCSHMEM_TEAM_WORLD in device memory
     hipLaunchKernelGGL(TeamAlltoallWorldTest<T1>, gridSize, blockSize,
                        shared_bytes, stream, loop, args.skip, start_time,
                        end_time, source_buf, dest_buf, num_elems,
-                       _shmem_context);
+                       _shmem_context, *team_alltoall_world_dup);
   } else {
     // Use split teams (original behavior)
     hipLaunchKernelGGL(TeamAlltoallTest<T1>, gridSize, blockSize, shared_bytes,
