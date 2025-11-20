@@ -66,6 +66,13 @@ class TeamAlltoallTester : public Tester {
    */
   int num_teams = 39;
   rocshmem_team_t *team_alltoall_world_dup;
+
+  /**
+   * Flag to use ROCSHMEM_TEAM_WORLD directly instead of creating split teams.
+   * This tests the bug where alltoall_pSync_pool is allocated with wrong size.
+   * Set via ROCSHMEM_TEST_USE_TEAM_WORLD environment variable.
+   */
+  bool use_team_world_directly = false;
 };
 
 #include "team_alltoall_tester.cpp"

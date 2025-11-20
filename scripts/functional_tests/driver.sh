@@ -117,6 +117,8 @@ ExecTest() {
   NUM_WG=$3
   NUM_THREADS=$4
   MAX_MSG_SIZE=$5
+  # Optional 6th parameter: additional environment variables (e.g., "VAR1=val1 VAR2=val2")
+  EXTRA_ENV=${6:-""}
   TIMEOUT=$((5 * 60)) # Timeout in seconds
 
   if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null
@@ -156,6 +158,21 @@ ExecTest() {
 
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+  
+  # Add extra environment variables to OPTIONS if provided
+  if [[ "" != "$EXTRA_ENV" ]]
+  then
+    # Parse EXTRA_ENV and add each variable to OPTIONS
+    for env_var in $EXTRA_ENV; do
+      OPTIONS+=" -x $env_var"
+      # Add suffix to log name to distinguish different test modes
+      if [[ "$env_var" == *"ROCSHMEM_TEST_USE_TEAM_WORLD=1"* ]]
+      then
+        TEST_LOG_NAME+="_teamworld"
+      fi
+    done
+  fi
+  
   CMD="$LAUNCHER $OPTIONS $APP -a $TEST_NUM -w $NUM_WG -z $NUM_THREADS"
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
@@ -421,6 +438,8 @@ TestColl() {
   ExecTest  "wgsyncall"        2       1            1
 
   ExecTest  "alltoall"         2       1            1         512
+  # Test alltoall with ROCSHMEM_TEAM_WORLD directly to catch sync size bug
+  ExecTest  "alltoall"         2       1            1         512 "ROCSHMEM_TEST_USE_TEAM_WORLD=1"
 
   ExecTest  "teambroadcast"    2       1            1         32768
 
@@ -606,6 +625,8 @@ TestGDA() {
   ExecTest  "syncall"          2       1            1
 
   ExecTest  "alltoall"         2       1            1         512
+  # Test alltoall with ROCSHMEM_TEAM_WORLD directly to catch sync size bug
+  ExecTest  "alltoall"         2       1            1         512 "ROCSHMEM_TEST_USE_TEAM_WORLD=1"
 
   ExecTest  "teambroadcast"    2       1            1         32768
 

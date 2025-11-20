@@ -53,7 +53,7 @@ TEAM_ALLTOALL_DEF_GEN(unsigned long, ulong)
 TEAM_ALLTOALL_DEF_GEN(unsigned long long, ulonglong)
 
 /******************************************************************************
- * DEVICE TEST KERNEL
+ * DEVICE TEST KERNEL - Uses split teams
  *****************************************************************************/
 template <typename T1>
 __global__ void TeamAlltoallTest(int loop, int skip, long long int *start_time,
@@ -81,6 +81,57 @@ __global__ void TeamAlltoallTest(int loop, int skip, long long int *start_time,
                     dest_buf,               // T* dest
                     source_buf,             // const T* source
                     num_elems);             // int nelement
+  }
+
+  __syncthreads();
+
+  if (hipThreadIdx_x == 0) {
+    end_time[wg_id] = wall_clock64();
+  }
+
+  rocshmem_wg_ctx_destroy(&ctx);
+}
+
+/******************************************************************************
+ * DEVICE TEST KERNEL - Uses ROCSHMEM_TEAM_WORLD directly
+ * This kernel tests the bug where ROCSHMEM_TEAM_WORLD is used before
+ * teams_init() completes, causing alltoall_pSync to point to uninitialized
+ * memory or memory allocated with wrong size.
+ *****************************************************************************/
+template <typename T1>
+__global__ void TeamAlltoallWorldTest(int loop,
+                                      int skip,
+                                      long long int *start_time,
+                                      long long int *end_time,
+                                      T1 *source_buf,
+                                      T1 *dest_buf,
+                                      int num_elems,
+                                      ShmemContextType ctx_type) {
+  __shared__ rocshmem_ctx_t ctx;
+  int wg_id = get_flat_grid_id();
+
+  // Use ROCSHMEM_TEAM_WORLD directly with default context
+  // This tests the bug where alltoall_pSync_pool is allocated with
+  // ROCSHMEM_BCAST_SYNC_SIZE (256) instead of ROCSHMEM_ALLTOALL_SYNC_SIZE (257)
+  rocshmem_wg_team_create_ctx(ROCSHMEM_TEAM_WORLD, ctx_type, &ctx);
+
+  int n_pes = rocshmem_ctx_n_pes(ctx);
+
+  source_buf += wg_id * n_pes * num_elems;
+  dest_buf += wg_id * n_pes * num_elems;
+
+  __syncthreads();
+
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip && hipThreadIdx_x == 0) {
+      start_time[wg_id] = wall_clock64();
+    }
+    // Use ROCSHMEM_TEAM_WORLD directly - this will catch the bug
+    // when alltoall_pSync points to incorrectly sized memory
+    wg_team_alltoall<T1>(ctx, ROCSHMEM_TEAM_WORLD,
+                         dest_buf,   // T* dest
+                         source_buf, // const T* source
+                         num_elems); // int nelement
   }
 
   __syncthreads();
@@ -123,28 +174,51 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
     num_teams = atoi(value);
   }
 
-  CHECK_HIP(hipMalloc(&team_alltoall_world_dup,
-                      sizeof(rocshmem_team_t) * num_teams));
+  // Check if we should use ROCSHMEM_TEAM_WORLD directly to test the bug
+  // Set ROCSHMEM_TEST_USE_TEAM_WORLD=1 to enable this test mode
+  use_team_world_directly = false;
+  if ((value = getenv("ROCSHMEM_TEST_USE_TEAM_WORLD"))) {
+    use_team_world_directly = (atoi(value) != 0);
+  }
+
+  if (use_team_world_directly) {
+    // When using TEAM_WORLD directly, we don't need to allocate teams array
+    team_alltoall_world_dup = nullptr;
+    // Warn if n_pes is less than 256, as the bug may not manifest
+    if (n_pes < 256) {
+      std::cerr << "Warning: Testing with ROCSHMEM_TEAM_WORLD directly. "
+                << "This test is designed to catch a bug that manifests "
+                << "when n_pes >= 256. Current n_pes = " << n_pes << std::endl;
+    }
+  } else {
+    CHECK_HIP(hipMalloc(&team_alltoall_world_dup,
+                        sizeof(rocshmem_team_t) * num_teams));
+  }
 }
 
 template <typename T1>
 TeamAlltoallTester<T1>::~TeamAlltoallTester() {
   rocshmem_free(source_buf);
   rocshmem_free(dest_buf);
-  CHECK_HIP(hipFree(team_alltoall_world_dup));
+  if (team_alltoall_world_dup != nullptr) {
+    CHECK_HIP(hipFree(team_alltoall_world_dup));
+  }
 }
 
 template <typename T1>
 void TeamAlltoallTester<T1>::preLaunchKernel() {
   bw_factor = n_pes;
 
-  for (int team_i = 0; team_i < num_teams; team_i++) {
-    team_alltoall_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
-    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                 &team_alltoall_world_dup[team_i]);
-    if (team_alltoall_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
-      std::cout << "Team " << team_i << " is invalid!" << std::endl;
-      abort();
+  // Only create split teams if not using TEAM_WORLD directly
+  if (!use_team_world_directly) {
+    for (int team_i = 0; team_i < num_teams; team_i++) {
+      team_alltoall_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
+      rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
+                                  &team_alltoall_world_dup[team_i]);
+      if (team_alltoall_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
+        std::cout << "Team " << team_i << " is invalid!" << std::endl;
+        abort();
+      }
     }
   }
 }
@@ -156,10 +230,20 @@ void TeamAlltoallTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
 
   int num_elems = size / sizeof(T1);
 
-  hipLaunchKernelGGL(TeamAlltoallTest<T1>, gridSize, blockSize, shared_bytes,
-                     stream, loop, args.skip, start_time, end_time,
-                     source_buf, dest_buf, num_elems, _shmem_context,
-                     team_alltoall_world_dup);
+  if (use_team_world_directly) {
+    // Use ROCSHMEM_TEAM_WORLD directly - this tests the bug where
+    // alltoall_pSync_pool is allocated with wrong size
+    hipLaunchKernelGGL(TeamAlltoallWorldTest<T1>, gridSize, blockSize,
+                       shared_bytes, stream, loop, args.skip, start_time,
+                       end_time, source_buf, dest_buf, num_elems,
+                       _shmem_context);
+  } else {
+    // Use split teams (original behavior)
+    hipLaunchKernelGGL(TeamAlltoallTest<T1>, gridSize, blockSize, shared_bytes,
+                       stream, loop, args.skip, start_time, end_time,
+                       source_buf, dest_buf, num_elems, _shmem_context,
+                       team_alltoall_world_dup);
+  }
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
@@ -167,8 +251,11 @@ void TeamAlltoallTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
 
 template <typename T1>
 void TeamAlltoallTester<T1>::postLaunchKernel() {
-  for (int team_i = 0; team_i < num_teams; team_i++) {
-    rocshmem_team_destroy(team_alltoall_world_dup[team_i]);
+  // Only destroy teams if we created them
+  if (!use_team_world_directly && team_alltoall_world_dup != nullptr) {
+    for (int team_i = 0; team_i < num_teams; team_i++) {
+      rocshmem_team_destroy(team_alltoall_world_dup[team_i]);
+    }
   }
 }
 
