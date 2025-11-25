@@ -345,19 +345,18 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
 
   // Use dynamic block size determination:
   // - Query optimal block size using occupancy API
-  // - Limit block size to size (number of bytes) to avoid over-subscription
-  // - Always use 1 block (single workgroup collective)
+  // - Use full block size for better GPU utilization
+  // - Single workgroup collective (alltoall uses wave-stride internally)
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
                                               rocshmem_alltoallmem_kernel, 0,
                                               0));
 
-  // Limit block size to size (bytes) to avoid over-subscription
-  int num_threads_per_block = (optimal_block_size > static_cast<int>(size))
-                                  ? static_cast<int>(size)
-                                  : optimal_block_size;
-                                  
+  // Use full optimal block size - the internal alltoall implementation
+  // distributes work across waves using a wave-stride pattern
+  int num_threads_per_block = optimal_block_size;
+
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
   rocshmem_alltoallmem_kernel<<<gridSize, blockSize, 0, stream>>>(team, dest,
